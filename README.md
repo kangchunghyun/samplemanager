@@ -1,2 +1,16 @@
-# samplemanager
-2025_SecuLetter_SampleManager_Project
+# 프로젝트 이름: SampleManager
+Python 기반으로 Seculetter QA팀의 샘플들을 관리하는 도구입니다. 
+품질보증팀이 보유하고 있는 샘플들은 각각 테스트케이스라고 할 수 있습니다.
+이러한 수많은 테스트케이스들을 관리하기 위해 DB 테이블을 생성하였으며, 
+검증 활동에 자주 사용하는 활동들을 스크립트화하여 빠른 작업이 이루어질 수 있도록 구현하였습니다. 
+
+# 주요기능
+- DB 접속
+- CSV -> DB 업데이트
+- Txt/CSV 파일을 통해 파일 가져오기
+- Tag 데이터를 통해 파일 가져오기
+
+# 기술스택
+- Python 3.10
+- PostgreSQL 14.17
+- tkinter
