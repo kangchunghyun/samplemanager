@@ -3,8 +3,14 @@ from pathlib import Path
 import shutil
 import config
 import csv
+<<<<<<< HEAD
 from db_utils import insert_fileinfo_record
 from tkinter import scrolledtext, Toplevel, filedialog, messagebox
+=======
+import sys
+from db_utils import insert_fileinfo_records
+from tkinter import filedialog, messagebox
+>>>>>>> 1a8b8f7 (update)
 
 # 신규 파일 복사 함수(미완성)
 def copy_file_from_dirs(file, search_dirs, dest_dir):
@@ -95,4 +101,56 @@ def run_csv_insertion(progress_var, button, batch_size):
         config.status_var.set(f"오류: {e}")
 
     finally:
+<<<<<<< HEAD
         button.config(state="normal")
+=======
+        button.config(state="normal")
+
+# Tree View 출력
+def tree_view(results, tree):
+
+    if not results:
+        return
+
+    rows, columns = results
+
+    # 기존 컬럼/데이터 모두 제거
+    tree.delete(*tree.get_children())
+    tree["columns"] = columns
+
+    # 컬럼 헤더 설정
+    for col in columns:
+        tree.heading(col, text=col)
+        tree.column(col, anchor="center", stretch=False)
+
+    # 데이터 삽입
+    for row in rows:
+        tree.insert("", "end", values=row)
+
+    config.status_var.set(f"✅ DB 조회 완료: {len(rows)}개 데이터")
+
+# Tree View 출력되는 데이터 CSV 파일로 저장
+def export_tree_to_csv(tree):
+    print("하하하")
+    if not tree.get_children():
+        config.status_var.set("❌ 저장할 데이터가 없습니다.")
+        return
+
+    file_path = filedialog.asksaveasfilename(
+        defaultextension=".csv",
+        filetypes=[("CSV 파일", "*.csv")],
+        title="CSV로 저장"
+    )
+    if not file_path:
+        return
+
+    columns = tree["columns"]
+    with open(file_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(columns)
+        for item in tree.get_children():
+            row = tree.item(item, "values")
+            writer.writerow(row)
+
+    config.status_var.set(f"✅ CSV 저장 완료: {file_path}")
+>>>>>>> 1a8b8f7 (update)

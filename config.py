@@ -34,4 +34,17 @@ error_log = []
 filename_entry = None
 filename_list = None
 copy_tag_mode = None
+<<<<<<< HEAD
 batch_size = 1000
+=======
+copy_file_mode = None
+batch_size = 1000
+select_csv = None
+dir_count = None
+
+# DB 쿼리 관련 변수
+select_query = None
+select_options = None
+checkboxoption = 0
+select_results = []
+>>>>>>> 1a8b8f7 (update)
