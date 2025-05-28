@@ -3,14 +3,9 @@ from pathlib import Path
 import shutil
 import config
 import csv
-<<<<<<< HEAD
-from db_utils import insert_fileinfo_record
-from tkinter import scrolledtext, Toplevel, filedialog, messagebox
-=======
 import sys
 from db_utils import insert_fileinfo_records
 from tkinter import filedialog, messagebox
->>>>>>> 1a8b8f7 (update)
 
 # 신규 파일 복사 함수(미완성)
 def copy_file_from_dirs(file, search_dirs, dest_dir):
@@ -74,7 +69,7 @@ def run_csv_insertion(progress_var, button, batch_size):
                 batch_failed = False
                 
                 for row in batch:
-                    if insert_fileinfo_record(row, tag_input):
+                    if insert_fileinfo_records(row, tag_input):
                         inserted += 1
                         
                     else:
@@ -101,9 +96,6 @@ def run_csv_insertion(progress_var, button, batch_size):
         config.status_var.set(f"오류: {e}")
 
     finally:
-<<<<<<< HEAD
-        button.config(state="normal")
-=======
         button.config(state="normal")
 
 # Tree View 출력
@@ -153,4 +145,3 @@ def export_tree_to_csv(tree):
             writer.writerow(row)
 
     config.status_var.set(f"✅ CSV 저장 완료: {file_path}")
->>>>>>> 1a8b8f7 (update)
