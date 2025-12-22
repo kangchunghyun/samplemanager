@@ -1,10 +1,11 @@
 # gui_main.py
 import tkinter as tk
-import csv
-from tkinter import filedialog, ttk
+from tkinter import filedialog, ttk, simpledialog
 from db_utils import connect_to_db, copy_file_from_db, execute_and_display_query 
 from file_utils import  run_csv_insertion, tree_view, export_tree_to_csv
 import config
+import threading
+from pathlib import Path
 
 # ------------------------- 기본 설정 -------------------------
 root = tk.Tk()
@@ -114,12 +115,28 @@ select_options_frame = tk.Frame(select_frame)
 select_options_frame.grid(row=1, column=1, padx=(0,0), pady=5, sticky="w")
 
 tk.Button(select_options_frame, text="조회", width=10,
-          command=lambda: tree_view(execute_and_display_query(select_query_entry.get(),config.checkboxoption.get()),tree)
-          ).pack(side="left", padx=(0,2))
+    command=lambda: threading.Thread(
+        target=lambda: tree_view(
+            execute_and_display_query(select_query_entry.get(), config.checkboxoption.get()), tree)
+    ).start()
+).pack(side="left", padx=(0,2))
 
-tk.Button(select_options_frame, text="Copy", width=10, 
-          command=lambda: copy_file_from_db()
-          ).pack(side="left", padx=(0,2))
+def on_copy_button():
+    dest_dir = filedialog.askdirectory()
+    if not dest_dir:
+        return
+    dir_count = simpledialog.askstring("입력 요청","경로 내의 파일 개수 설정")
+    if dir_count is None:
+        return
+    # 빈 문자열을 0으로 처리
+    if dir_count == '':
+        dir_count = 0
+    # 복사 작업만 별도 스레드로 실행 (UI는 이미 메인 스레드에서 처리됨)
+    threading.Thread(target=copy_file_from_db, args=(dest_dir, dir_count), daemon=True).start()
+
+tk.Button(select_options_frame, text="Copy", width=10,
+          command=on_copy_button
+).pack(side="left", padx=(0,2))
 
 tk.Button(select_options_frame, text="Export", width=10, bg="#4CAF50", fg="white", font=("맑은 고딕", 9, "bold"),
           command=lambda: export_tree_to_csv(tree)
@@ -145,7 +162,7 @@ tk.Label(input_frame, text="태그 입력:").grid(row=1, column=0, padx=5, pady=
 tk.Entry(input_frame, textvariable=config.tags, width=30).grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="w")
 
 # 버튼 라인
-insert_btn = tk.Button(input_frame, text="입력", width=20, command=lambda: run_csv_insertion(config.progress_var, insert_btn, config.batch_size))
+insert_btn = tk.Button(input_frame, text="입력", width=20, command=lambda: threading.Thread(target=run_csv_insertion, args=(config.progress_var, insert_btn, config.batch_size)).start())
 insert_btn.grid(row=2, column=1, padx=5, pady=10, sticky="w")
 # ------------------------- 상태바 -------------------------
 status_frame = ttk.Frame(root)

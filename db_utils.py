@@ -54,7 +54,7 @@ def disconnect_from_db():
         #messagebox.showwarning("DB 연결 상태", "현재 DB에 연결되어 있지 않습니다.")
         config.status_var.set("❌ 현재 DB에 연결되어 있지 않습니다.")
 
-# ------------------------- DB 쿼리 제작 및 출력력 -------------------------
+# ------------------------- DB 쿼리 제작 및 출력 -------------------------
 def execute_and_display_query(query, tag_check):
 
     conditions = None
@@ -64,13 +64,20 @@ def execute_and_display_query(query, tag_check):
         else: 
             conditions = query
     elif tag_check == 1:
-        conditions = (f"tag && ARRAY['{query}']")
+        tag_query = []
+
+        if query != "":
+            for q in query.split(','):
+                tag_query.append(f"'{q.strip()}'")  # 각 쿼리를 작은따옴표로 감싸고 공백 제거
+            print(f"Processed query: {tag_query}")
+
+        conditions = (f"tag @> ARRAY[{','.join(tag_query)}]::text[]") if tag_query else "1=1"
 
     full_query = f"SELECT * FROM fileinfo WHERE {conditions}"
 
     if tag_check == 1:
         if query == "":
-            full_query = "SELECT DISTINCT unnest(tag) AS Unique_Tag FROM fileinfo WHERE tag IS NOT NULL;"
+            full_query = "SELECT DISTINCT unnest(tag) AS TAG FROM fileinfo WHERE tag IS NOT NULL;"
 
     print(f"Executing query: {full_query}")
     config.status_var.set("DB 조회 중...")
@@ -94,6 +101,7 @@ def select_fileinfo_records(query):
             config.status_var.set("❌ 조회된 데이터가 없습니다.")
             return []
         return rows, column_names
+    
     except Exception as e:
         print(f"[오류] DB 조회 실패: {e}")
         #messagebox.showerror("DB 조회 실패", str(e))
@@ -102,6 +110,101 @@ def select_fileinfo_records(query):
         return []
 
 # ------------------------- CSV 데이터 -> DB 삽입 -------------------------
+def insert_fileinfo_batch(batch_rows, user_tags, conn):
+    from psycopg2.extras import execute_values
+    from datetime import datetime
+    from pathlib import Path
+
+    now = datetime.now()
+    base_path = Path(r"\\192.168.2.22\SAMPLE")
+    
+    values = []
+
+    def to_tag_list(value):
+        if not value:              # None, "", [], 등 falsy는 빈 리스트로
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]             # 문자열/기타 단일 값은 리스트로 감싸기
+
+    # 디버그: 전달된 user_tags 타입 확인 (원하면 제거)
+    print("insert_fileinfo_batch called, user_tags type:", type(user_tags), "value:", user_tags)
+
+    for row in batch_rows:
+        sha256 = row.get('sha256')
+        prefix = sha256[:3] if sha256 else 'UNK'
+        filename = sha256 + '.' + row.get('strExtension', '') if row.get('strExtension') else sha256
+        full_path = str(base_path / prefix / (filename or 'unknown'))
+
+        csv_tags_raw = row.get("tags", [])
+        csv_tags = to_tag_list(csv_tags_raw)
+        user_tag_list = to_tag_list(user_tags)
+
+        combined_tags = list({
+            tag.strip()
+            for tag in (csv_tags + user_tag_list)
+            if isinstance(tag, str) and tag.strip()
+        })
+
+        values.append((
+            row.get('sha256'),
+            row.get('originalFilename'),
+            filename,
+            full_path,
+            row.get('size'),
+            row.get('mimeType'),
+            row.get('detectedExtension'),
+            combined_tags,
+            now,
+            now
+        ))
+
+    print("Prepared values count:", len(values))
+
+    sql = """
+        INSERT INTO fileinfo (
+            sha256,
+            originalFilename,
+            fileName,
+            path,
+            fileSize, 
+            mimeType, 
+            extension, 
+            tag, 
+            createdTime, 
+            lastModifyTime
+        )
+        VALUES %s
+        ON CONFLICT (sha256) DO UPDATE SET
+            tag = (
+                SELECT ARRAY(
+                    SELECT DISTINCT trim(t)
+                    FROM unnest(
+                        COALESCE(fileinfo.tag, ARRAY[]::TEXT[]) ||
+                        COALESCE(EXCLUDED.tag, ARRAY[]::TEXT[])
+                    ) AS t
+                    WHERE trim(t) <> ''
+                )
+            ),
+            originalFilename = EXCLUDED.originalFilename,
+            filename = EXCLUDED.filename,
+            path = EXCLUDED.path,
+            fileSize = EXCLUDED.fileSize,
+            mimeType = EXCLUDED.mimeType,
+            extension = EXCLUDED.extension,
+            lastModifyTime = EXCLUDED.lastModifyTime;
+    """
+
+    try:
+        with conn.cursor() as cur:
+            execute_values(cur, sql, values)
+        conn.commit()  # 🔁 변경사항 저장 추가
+        return True
+    except Exception as e:
+        print("Batch insert 실패:", e)
+        conn.rollback()  # 선택적: 실패 시 롤백
+        return False
+# ------------------------- CSV 파일 -> DB 삽입 (미사용?)-------------------------
 def insert_fileinfo_records(row, user_tags):
     now = datetime.now()
     config.base_path = Path(r"\\192.168.2.22\SAMPLE")
@@ -158,7 +261,7 @@ def insert_fileinfo_records(row, user_tags):
             full_path,
             row.get('filesize'),
             row.get('mimetype'),
-            row.get('detectedExtension'),
+            row.get('extension'),
             combined_tags,  # 병합된 태그 사용
             now,
             now
@@ -171,7 +274,7 @@ def insert_fileinfo_records(row, user_tags):
         config.error_log.append(f"{row.get('fileName', 'unknown')} 처리 실패: {e}")
         return False
     
-# ------------------------- DB 업데이트 후 파일 이동 (미사용용) -------------------------
+# ------------------------- DB 업데이트 후 파일 이동 (미사용) -------------------------
 def move_file_to_destination(file, sha256, base_path):
     try:
         if '.' in file:
@@ -191,30 +294,23 @@ def move_file_to_destination(file, sha256, base_path):
         config.status_var.set(f"❌ 파일 이동 실패: {file} 이동 실패: {e}")
         config.error_log.append(f"{file} 이동 실패: {e}")
 # ------------------------- DB 내의 Name 검색 후 Path Return -------------------------
-def copy_file_from_db():
+def copy_file_from_db(dest_dir, dir_count):
 
+    # 기존 내부에서 filedialog / simpledialog 호출 제거하고 전달된 값 사용
     if not config.conn:
-        #messagebox.showwarning("DB 연결 상태", "현재 DB에 연결되어 있지 않습니다.")
         config.status_var.set("❌ 현재 DB에 연결되어 있지 않습니다.")
-        return 
-    
+        return
+
     rows, columns = config.select_results
     if 'path' not in columns:
         config.status_var.set("❌ Path 경로가 조회되지 않습니다. ")
-        return 
+        return
 
-    dest_dir = filedialog.askdirectory()
-    print(dest_dir)
-    if dest_dir == "":
-        return 
-    
     dest_dir = Path(dest_dir)
-    
-    dir_count = simpledialog.askstring("입력 요청","경로 내의 파일 개수 설정")
     if dir_count == '':
         dir_count = 0
-    elif dir_count == None:
-        return
+    else:
+        dir_count = int(dir_count)
 
     dict_rows = [dict(zip(columns, row)) for row in rows]
     data = [
@@ -256,3 +352,48 @@ def copy_file_from_db():
     except Exception as e:
         print(f"[ERROR] DB 검색 실패: {e}")
         return None
+    
+
+def save_failed_files(output_path, failed_list):
+    """
+    실패한 파일 목록을 CSV로 저장합니다.
+
+    Parameters:
+        failed_list (list of dict or list/tuple): 실패한 항목들의 리스트.
+            - dict: 각 항목의 키를 필드명으로 사용
+            - tuple/list (길이 2): (path, reason) 형태로 처리
+        output_path (str or Path): 저장할 디렉터리(또는 파일 경로)의 Path
+    """
+    if not failed_list:
+        print("실패한 항목이 없습니다.")
+        return
+
+    try:
+        output_path = Path(output_path)
+        # normalize rows to list of dicts
+        first = failed_list[0]
+        if isinstance(first, dict):
+            rows = failed_list
+            fieldnames = list(first.keys())
+        elif isinstance(first, (list, tuple)):
+            # common case: (path, reason)
+            if len(first) == 2:
+                fieldnames = ['path', 'reason']
+                rows = [{'path': item[0], 'reason': item[1]} for item in failed_list]
+            else:
+                # fallback: index-based column names
+                fieldnames = [f'col{i}' for i in range(len(first))]
+                rows = [{f'col{i}': v for i, v in enumerate(item)} for item in failed_list]
+        else:
+            # fallback: single 'value' column
+            fieldnames = ['value']
+            rows = [{'value': str(item)} for item in failed_list]
+
+        csv_file = output_path / "★_failed_list.csv"
+        with open(csv_file, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"실패한 파일 목록이 '{csv_file}'에 저장되었습니다.")
+    except Exception as e:
+        print(f"저장 중 오류 발생: {e}")

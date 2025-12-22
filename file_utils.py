@@ -4,8 +4,12 @@ import shutil
 import config
 import csv
 import sys
-from db_utils import insert_fileinfo_records
+from db_utils import insert_fileinfo_records, insert_fileinfo_batch
 from tkinter import filedialog, messagebox
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import queue
+import time
 
 # 신규 파일 복사 함수(미완성)
 def copy_file_from_dirs(file, search_dirs, dest_dir):
@@ -31,7 +35,26 @@ def select_filename_list():
     filename = filedialog.askopenfilename(filetypes=[("Text/CSV Files", "*.csv;*.txt")])
     config.filename_list_path.set(filename)
 
-# ------------------------- DB 업데이트 함수  -------------------------
+#------------------------- CSV 데이터 -> DB 삽입(멀티쓰레드) -------------------------
+def extract_batch(reader_chunk):
+    batches = []
+    for i in range(0, len(reader_chunk), config.batch_size):
+        batches.append(reader_chunk[i : i + config.batch_size])
+    return batches
+
+def split_and_batch_parallel(reader_data, num_workers):
+    chunk_size = len(reader_data) // num_workers
+    chunks = [reader_data[i:i + chunk_size] for i in range(0, len(reader_data), chunk_size)]
+
+    all_batches = []
+    print(f"총 {len(chunks)}개의 청크로 분할되었습니다.")  # 디버깅용 출력
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        results = executor.map(extract_batch, chunks)
+        for batch_list in results:
+            all_batches.extend(batch_list)
+
+    return all_batches
+
 def run_csv_insertion(progress_var, button, batch_size):
     progress_var.set(0)
     config.progress_bar.update_idletasks()
@@ -58,37 +81,37 @@ def run_csv_insertion(progress_var, button, batch_size):
         with open(filepath, newline='', encoding='utf-8-sig') as csvfile:
             reader = list(csv.DictReader(csvfile))
             row_count = len(reader)
+            print(f"CSV 파일 행 수: {row_count}")  # 디버깅용 출력
 
             if row_count == 0:
                 messagebox.showerror("오류", "CSV 파일이 비어 있습니다.")
                 config.status_var.set("CSV 파일이 비어 있습니다.")
                 return
-            
-            for batch_start in range(0, row_count, batch_size):
-                batch = reader[batch_start:batch_start + batch_size]
-                batch_failed = False
-                
-                for row in batch:
-                    if insert_fileinfo_records(row, tag_input):
-                        inserted += 1
-                        
-                    else:
-                        failed += 1
-                        batch_failed = True
 
-                if batch_failed:
+            # ✅ 병렬로 batch 나누기 (예: 4개의 스레드로)
+            all_batches = split_and_batch_parallel(reader, num_workers=4)
+            total_batches = len(all_batches)
+
+            inserted = 0
+            failed = 0
+
+            for i, batch in enumerate(all_batches):
+                print(f"처리 중 배치 {i + 1}/{total_batches} (크기: {len(batch)})")
+                success = insert_fileinfo_batch(batch, tag_input, config.conn)
+
+                if success:
+                    inserted += len(batch)
+                    config.conn.commit()
+                else:
+                    failed += len(batch)
                     config.conn.rollback()
 
-                else: 
-                    config.conn.commit()
-
-
-                progress = ((batch_start + len(batch)) / row_count) * 100
+                progress = ((i + 1) / total_batches) * 100
                 progress_var.set(progress)
                 config.progress_bar.update_idletasks()
 
-        config.status_var.set(f"삽입 완료: {inserted}건, 실패: {failed}건")
-        progress_var.set(100)
+            config.status_var.set(f"삽입 완료: {inserted}건, 실패: {failed}건")
+            progress_var.set(100)
 
     except Exception as e:
         print("오류", f"파일 열기 실패 또는 DB 오류: {e}")
